@@ -1,0 +1,9 @@
+/ch_PP-OCRv3_det_distill_train
+/ch_PP-OCRv3_rec_train
+/configs
+/e2e_visualize
+/inference_results
+/log_output
+/temp
+/TQDN
+/venv
