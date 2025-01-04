@@ -16,5 +16,7 @@ albumentations==1.4.10
 albucore==0.0.13
 packaging
 pyaml
-paddlepaddle==3.0.0b1 -i https://www.paddlepaddle.org.cn/packages/stable/cpu/
 streamlit
+
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/
+paddlepaddle==3.0.0b1
