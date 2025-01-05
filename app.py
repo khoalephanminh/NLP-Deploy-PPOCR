@@ -131,7 +131,7 @@ def main():
                 det_results_path = os.path.join("./inference_results", "det_results.txt")
                 # Display the result image
                 if os.path.exists(result_image_path):
-                    with open(det_results_path, "r") as file:
+                    with open(det_results_path, "r", encoding='utf-8') as file:
                         det_results_content = file.read()
                         json_content = det_results_content.split('\t', 1)[1]
                         results = json.loads(json_content)
@@ -283,7 +283,7 @@ def main():
                 system_results_path = os.path.join("./e2e_visualize", "system_results.txt")
                 # Display the result image
                 if os.path.exists(result_image_path):
-                    with open(system_results_path, "r") as file:
+                    with open(system_results_path, "r", encoding='utf-8') as file:
                         system_results_content = file.read()
                         json_content = system_results_content.split('\t', 1)[1]
                         results = json.loads(json_content)
