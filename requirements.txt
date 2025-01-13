@@ -76,3 +76,4 @@ tzdata==2024.2
 urllib3==2.3.0
 XlsxWriter==3.2.0
 PyMuPDF
+PyPDF2

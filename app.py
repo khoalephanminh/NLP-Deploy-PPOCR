@@ -3,6 +3,7 @@ import json
 import logging
 import sys
 from numpy import std
+from ppocr.utils.utility import check_and_read, get_image_file_list
 import streamlit as st
 import subprocess
 import os
@@ -13,6 +14,7 @@ from style import custom_css
 import pandas as pd
 from zipfile import ZipFile
 from xlsxwriter.workbook import Workbook
+import cv2
 
 st.set_page_config('Chinese PaddleOCR for server - Group 02', layout="wide")
 st.markdown(custom_css, unsafe_allow_html=True)
@@ -27,9 +29,11 @@ def call_predict_system(det_model_dir, rec_model_dir, image_path, draw_img_save_
         "--det_model_dir", det_model_dir,
         "--rec_model_dir", rec_model_dir,
         "--image_dir", image_path,
-        "--rec_image_shape", "3, 32, 320",
+        "--rec_image_shape", "3, 32, 640",
         "--draw_img_save_dir", draw_img_save_dir,
-        "--rec_char_dict_path", "./ppocr/utils/chinese_cht_dict.txt",
+        "--rec_char_dict_path", "./ppocr/utils/chinese_cht_dict_update.txt",
+        "--det_db_unclip_ratio=2.5",
+        "--rec_batch_num=1",
         "--use_gpu", str(use_gpu).lower()
     ]
     result = subprocess.run(cmd, capture_output=True, env=env)
@@ -78,33 +82,75 @@ def cleanup_temp_dir():
         shutil.rmtree(data_dir)
         print(f"Deleted {data_dir} directory")
 
+    data_dir = "e2e_visualize"
+    if os.path.exists(data_dir):
+        shutil.rmtree(data_dir)
+        print(f"Deleted {data_dir} directory")
+
+    data_dir = "inference_results"
+    if os.path.exists(data_dir):
+        shutil.rmtree(data_dir)
+        print(f"Deleted {data_dir} directory")
+
 atexit.register(cleanup_temp_dir)
 
 from PIL import Image
 
 def preprocess(uploaded_files):
+    cleanup_temp_dir()
     st.session_state.data = {}
     image = {}
-    for uploaded_file in uploaded_files:
-        # To read file as bytes:
-        bytes_data = uploaded_file.getvalue()
-        img = bytes_to_numpy(bytes_data, channels='RGB')
-        pil_img = Image.open(uploaded_file)
+    is_rec = False
+    is_pdf = False
 
-        image[uploaded_file.name] = {
-            'img': img,
-            'pil_img': pil_img
-        }
+    image_names = []
 
-        temp_dir = "temp"
-        os.makedirs(temp_dir, exist_ok=True)
-        # Save the uploaded file to a temporary location
-        temp_image_path = os.path.join(temp_dir, uploaded_file.name)
+    temp_dir = "temp"
+    os.makedirs(temp_dir, exist_ok=True)
+    os.makedirs('data', exist_ok=True)
+    os.makedirs('data/img', exist_ok=True)
 
-        os.makedirs('data', exist_ok=True)
-        os.makedirs('data/img', exist_ok=True)
+
+    if uploaded_files[0].type.startswith("application/pdf"):
+        is_pdf = True
+        bytes_data = uploaded_files[0].getvalue()
+        temp_image_path = os.path.join(temp_dir, uploaded_files[0].name)
         with open(temp_image_path, "wb") as f:
             f.write(bytes_data)
+
+        imgs, flag_gif, flag_pdf = check_and_read(temp_image_path)
+
+        for idx, img in enumerate(imgs):
+            # Convert back from OpenCV format to PIL image
+            pil_img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            image[f'{uploaded_files[0].name}_{idx}.png'] = {
+                'img': img,
+                'pil_img': pil_img
+            }
+            image_names.append(f'{uploaded_files[0].name}_{idx}.png')
+
+
+    if uploaded_files[0].type.startswith("image"):
+        for uploaded_file in uploaded_files:
+            # To read file as bytes:
+            bytes_data = uploaded_file.getvalue()
+
+            img = bytes_to_numpy(bytes_data, channels='RGB')
+            pil_img = Image.open(uploaded_file)
+
+            if pil_img.height < 100: 
+                is_rec = True
+
+            image[uploaded_file.name] = {
+                'img': img,
+                'pil_img': pil_img
+            }
+
+            temp_image_path = os.path.join(temp_dir, uploaded_file.name)
+            with open(temp_image_path, "wb") as f:
+                f.write(bytes_data)
+
+            image_names.append(uploaded_file.name)
 
     # Call the predict_det.py script
     use_gpu = False
@@ -115,11 +161,18 @@ def preprocess(uploaded_files):
     #     pass
 
     # Call the predict_system.py script
-    det_model_dir = "output/det_finetune"
-    rec_model_dir = "output/rec_finetune"
-    stdout, stderr = call_predict_system(det_model_dir, rec_model_dir, temp_dir, draw_img_save_dir, use_gpu)
+    det_model_dir = "model/det_finetune"
+    rec_model_dir = "model/rec_finetune"
+
+    if is_rec:
+        stdout, stderr = call_predict_rec(temp_dir, rec_model_dir, '3, 32, 640', "./ppocr/utils/chinese_cht_dict_update.txt", use_gpu)
+    else:
+        stdout, stderr = call_predict_system(det_model_dir, rec_model_dir, temp_dir, draw_img_save_dir, use_gpu)
+        # if is_pdf: os.remove(temp_image_path)
 
     system_results_path = os.path.join("./e2e_visualize", "system_results.txt")
+
+    if is_rec: return stdout, stderr, is_rec, image_names
 
     with open(system_results_path, "r", encoding='utf-8') as file:
         lines = file.readlines()
@@ -147,6 +200,9 @@ def preprocess(uploaded_files):
                 worksheet.write_row(0, 0, ['Image_Name', 'ID', 'Image Box', 'OCR Text'], header_format)
                 for system_results_content in lines:
                     file_name = system_results_content.split('\t', 1)[0]
+                    if not '.png' in file_name and not '.jpg' in file_name and not '.jpeg' in file_name:
+                        file_name = file_name + '.png'
+
                     json_content = system_results_content.split('\t', 1)[1]
                     results = json.loads(json_content)
 
@@ -161,7 +217,7 @@ def preprocess(uploaded_files):
                     pil_img = image[file_name]['pil_img']
 
                     st.session_state.data[file_name] = {
-                        'current_image_path': f'./e2e_visualize/{file_name}',   
+                        'current_image_path': f'./e2e_visualize/{file_name.replace(".pdf", "")}',   
                         'boxes': []
                     }
 
@@ -182,8 +238,8 @@ def preprocess(uploaded_files):
 
                         # Resize the image patch if it is too large
                         max_size = (300, 300)
-                        if width > max_size[0] or height > max_size[1]:
-                            image_patch.thumbnail(max_size, Image.LANCZOS)
+                        # if width > max_size[0] or height > max_size[1]:
+                        #     image_patch.thumbnail(max_size, Image.LANCZOS)
 
                         # Image Name
                         image_name = file_name
@@ -232,7 +288,7 @@ def preprocess(uploaded_files):
             zip_file.write('data/data.json')
             zip_file.write('data/data.xlsx')
 
-    return stdout, stderr 
+    return stdout, stderr, is_rec, image_names 
 
 def main():
     # Upload image
@@ -242,21 +298,46 @@ def main():
     ---
     """)
     uploaded_files = st.sidebar.file_uploader('Please select an image', type=['png', 'jpg', 'jpeg', 'pdf'], accept_multiple_files=True)
-    print('uploaded_file:', uploaded_files)
 
-    stdout = ''
-    stderr = ''
+    # Initialize session state attributes if they don't exist
+    if 'stdout' not in st.session_state:
+        st.session_state.stdout = ''
+    if 'stderr' not in st.session_state:
+        st.session_state.stderr = ''
+    if 'is_rec' not in st.session_state:
+        st.session_state.is_rec = False
+    if 'image_names' not in st.session_state:
+        st.session_state.image_names = []
 
     if len(uploaded_files) > 0:
         if 'data' not in st.session_state:
-            stdout, stderr = preprocess(uploaded_files)
+            stdout, stderr, is_rec, image_names = preprocess(uploaded_files)
             st.session_state.current_index = 0
+            st.session_state.stdout = stdout
+            st.session_state.stderr = stderr
+            st.session_state.is_rec = is_rec
+            st.session_state.image_names = image_names
+
+    stdout = st.session_state.stdout
+    stderr = st.session_state.stderr
+    is_rec = st.session_state.is_rec
+    image_names = st.session_state.image_names
 
     if 'data' in st.session_state:
-
-        current_data = st.session_state.data[uploaded_files[st.session_state.current_index].name]
-
         col1, col2 = st.columns(2)
+        
+        # Display the output
+        with col1:
+            with st.expander('Standard Output:'):
+                st.text(stdout)
+            with st.expander("Standard Error:"):
+                st.text(stderr)
+
+        if is_rec: return
+
+        # current_data = st.session_state.data[uploaded_files[st.session_state.current_index].name]
+        current_data = st.session_state.data[image_names[st.session_state.current_index]]
+
 
         with col2:
             for idx, box in enumerate(current_data['boxes']):
@@ -303,24 +384,16 @@ def main():
                 if st.session_state.current_index > 0:
                     if st.button('Previous Image'):
                         st.session_state.current_index -= 1
-                        print('current_index:', st.session_state.current_index)
                         st.rerun()
                 else:
                     st.write('')
             with col12:
-                if st.session_state.current_index < len(uploaded_files) - 1:
+                if st.session_state.current_index < len(image_names) - 1:
                     if st.button('Next Image'):
                         st.session_state.current_index += 1
-                        print('current_index:', st.session_state.current_index)
                         st.rerun()
                 else:
                     st.write('')
-            st.image(current_data['current_image_path'], caption='Result Image')
+            st.image(current_data['current_image_path'], caption=os.path.basename(current_data['current_image_path']))
 
-        # Display the output
-        with col1:
-            with st.expander('Standard Output:'):
-                st.text(stdout)
-            with st.expander("Standard Error:"):
-                st.text(stderr)
 main()
