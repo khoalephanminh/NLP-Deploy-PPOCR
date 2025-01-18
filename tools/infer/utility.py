@@ -504,9 +504,12 @@ def draw_ocr_box_txt(
     img_right = np.ones((h, w, 3), dtype=np.uint8) * 255
     random.seed(0)
 
+    drop_score=0.0
+
     draw_left = ImageDraw.Draw(img_left)
     if txts is None or len(txts) != len(boxes):
         txts = [None] * len(boxes)
+
     for idx, (box, txt) in enumerate(zip(boxes, txts)):
         if scores is not None and scores[idx] < drop_score:
             continue

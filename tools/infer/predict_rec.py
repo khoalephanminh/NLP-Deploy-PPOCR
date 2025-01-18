@@ -40,9 +40,13 @@ class TextRecognizer(object):
     def __init__(self, args, logger=None):
         if logger is None:
             logger = get_logger()
+
+        # print("args=", args)
         self.rec_image_shape = [int(v) for v in args.rec_image_shape.split(",")]
         self.rec_batch_num = args.rec_batch_num
         self.rec_algorithm = args.rec_algorithm
+
+        # print("rec_algorithm:", self.rec_algorithm, "rec_image_shape:", self.rec_image_shape)
         postprocess_params = {
             "name": "CTCLabelDecode",
             "character_dict_path": args.rec_char_dict_path,
@@ -540,6 +544,7 @@ class TextRecognizer(object):
         return img
 
     def __call__(self, img_list):
+        # print("img_list:", img_list)
         img_num = len(img_list)
         # Calculate the aspect ratio of all text bars
         width_list = []
@@ -802,6 +807,7 @@ class TextRecognizer(object):
                     else:
                         preds = outputs[0]
             if self.postprocess_params["name"] == "CTCLabelDecode":
+                # print("preds=", preds)
                 rec_result = self.postprocess_op(
                     preds,
                     return_word_box=self.return_word_box,
@@ -851,6 +857,8 @@ def main(args):
         img, flag, _ = check_and_read(image_file)
         if not flag:
             img = cv2.imread(image_file)
+            # os.makedirs('./yyy', exist_ok=True)
+            # cv2.imwrite(f'./yyy/x.jpg', img)
         if img is None:
             logger.info("error in loading image:{}".format(image_file))
             continue
